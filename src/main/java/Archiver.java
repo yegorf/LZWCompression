@@ -8,10 +8,28 @@ public class Archiver {
     private final int BIT_SIZE = 13;
     private final int MAX_SIZE = 8192;
 
+    public static void main(String[] args) throws IOException {
+        Archiver archiver = new Archiver();
+        String fileName = "image.bmp";
+        String archive = archiver.archive(fileName);
+        archiver.unzip(fileName, archive);
+    }
+
+    public void writeFile(StringBuilder bitsBuffer, String archive) throws IOException {
+        DataOutputStream outputStream = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(archive)));
+        while (bitsBuffer.length() > 0) {
+            while (bitsBuffer.length() < BYTE_SIZE) {
+                bitsBuffer.append('0');
+            }
+            outputStream.writeByte((byte) Integer.parseInt(bitsBuffer.substring(0, BYTE_SIZE), 2));
+            bitsBuffer.delete(0, BYTE_SIZE);
+        }
+        outputStream.close();
+    }
+
     public String archive(String fileName) throws IOException {
         String archive = fileName + ".lzw";
         DataInputStream inputStream = new DataInputStream(new BufferedInputStream(new FileInputStream(fileName)));
-        DataOutputStream outputStream = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(archive)));
 
         HashMap<String, Integer> vocabulary = new HashMap<>();
         for(int i = 0; i < ASCII_COUNT; i++) {
@@ -20,7 +38,7 @@ public class Archiver {
 
         byte readByte;
         StringBuilder charBuffer = new StringBuilder();
-        StringBuilder bitsBuffer = new StringBuilder();
+        StringBuilder binBuffer = new StringBuilder();
         int count = ASCII_COUNT;
         char symbol;
 
@@ -32,12 +50,11 @@ public class Archiver {
             }
             symbol = getChar(readByte);
 
-            if (vocabulary.containsKey(charBuffer.toString() + symbol)) { // Если в словаре есть последовательность
+            if (vocabulary.containsKey(charBuffer.toString() + symbol)) {
                 charBuffer.append(symbol);
             } else {
-                //Тут клеим к битТемпу вот что: берем из мапы значение по ключу темпа. и переводим его в 12 бит.
                 String bits = toBits(vocabulary.get(charBuffer.toString()));
-                bitsBuffer.append(bits);
+                binBuffer.append(bits);
 
                 if(count < MAX_SIZE) {
                     charBuffer.append(symbol);
@@ -47,19 +64,8 @@ public class Archiver {
                 charBuffer = new StringBuilder((String.valueOf(symbol)));
             }
         }
-
-        bitsBuffer.append(toBits(vocabulary.get(charBuffer.toString())));
-        while (bitsBuffer.length() > 0) {
-            while (bitsBuffer.length() < BYTE_SIZE) {
-                bitsBuffer.append('0');
-            }
-            outputStream.writeByte((byte) Integer.parseInt(bitsBuffer.substring(0, 8), 2));
-            bitsBuffer.delete(0, BYTE_SIZE);
-        }
-
         inputStream.close();
-        outputStream.close();
-
+        writeFile(binBuffer, archive);
         return archive;
     }
 
@@ -73,45 +79,46 @@ public class Archiver {
             vocabulary.add(Character.toString((char) i));
         }
 
-        int currentWord;
-        int priorityWord;
+        int firstString;
+        int secondString;
+
         boolean neof = true;
 
-        StringBuilder bitsBuffer = new StringBuilder();
-        read(bitsBuffer, inputStream);
-        read(bitsBuffer, inputStream);
+        StringBuilder binBuffer = new StringBuilder();
+        read(binBuffer, inputStream);
+        read(binBuffer, inputStream);
 
-        priorityWord = getNum(bitsBuffer);
+        firstString = getNum(binBuffer);
 
-        outputStream.writeBytes(vocabulary.get(priorityWord));
+        outputStream.writeBytes(vocabulary.get(firstString));
 
         while (neof) {
             try {
-                while (bitsBuffer.length() < BIT_SIZE) {
-                    read(bitsBuffer, inputStream);
+                while (binBuffer.length() < BIT_SIZE) {
+                    read(binBuffer, inputStream);
                 }
             } catch (EOFException e) {
                 neof = false;
             }
-            if(bitsBuffer.length() < BIT_SIZE) {
+            if(binBuffer.length() < BIT_SIZE) {
                 break;
             } else {
-                currentWord = getNum(bitsBuffer);
+                secondString = getNum(binBuffer);
             }
 
-            if (currentWord >= vocabulary.size()) {
-                String s = vocabulary.get(priorityWord) + vocabulary.get(priorityWord).charAt(0);
+            if (secondString >= vocabulary.size()) {
+                String s = vocabulary.get(firstString) + vocabulary.get(firstString).charAt(0);
                 if (vocabulary.size() < MAX_SIZE) {
                     vocabulary.add(s);
                 }
                 outputStream.writeBytes(s);
             } else {
                 if (vocabulary.size() < MAX_SIZE) {
-                    vocabulary.add(vocabulary.get(priorityWord) + vocabulary.get(currentWord).charAt(0));
+                    vocabulary.add(vocabulary.get(firstString) + vocabulary.get(secondString).charAt(0));
                 }
-                outputStream.writeBytes(vocabulary.get(currentWord));
+                outputStream.writeBytes(vocabulary.get(secondString));
             }
-            priorityWord = currentWord;
+            firstString = secondString;
         }
 
         inputStream.close();
